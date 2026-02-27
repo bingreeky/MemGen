@@ -2,7 +2,7 @@
 
 
 ## 👋 Introduction
-This repo is the official implementation of [***MemGen: Weaving Generative Latent Memory for Self-Evolving Agents***](https://arxiv.org/pdf/2509.24704)
+This repo is the official implementation of [**[ICLR 2026] MemGen: Weaving Generative Latent Memory for Self-Evolving Agents**](https://arxiv.org/pdf/2509.24704).
 
 Inspired by the human brain’s ability to dynamically integrate memory and reasoning, MemGen introduces a novel framework that empowers AI agents to evolve through experience—without relying on rigid parameter updates or external databases.
 
@@ -52,7 +52,7 @@ Please follow the instructions in the [Search-R1](https://github.com/PeterGriffi
 
 ## 🤗 Quick Evaluation
 
-Below are several MemGen models based on Qwen2.5-1.5B-Instruct and SmolLM3-3B across multiple datasets. Due to limited GPU resources, we are still training and preparing additional releases. We appreciate your patience and understanding!
+Below are several MemGen models based on Qwen2.5-1.5B-Instruct and SmolLM3-3B across multiple datasets. We are currently in the process of carefully validating additional checkpoints to ensure they are fully reproducible and can be released in a clean, one-click setup. We appreciate your patience as we complete this verification process.
 
 | model   | dataset | mode   | link                    | eval_script      | train_script|
 |---------|---------|--------|------------------------|------------------|-|
