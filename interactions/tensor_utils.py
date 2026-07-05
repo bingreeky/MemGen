@@ -81,5 +81,8 @@ class TensorHelper:
         seq_len = completion_ids.size(1)
         col_indices = torch.arange(seq_len, device=completion_ids.device)
         mask_to_replace = (col_indices > first_eos_indices.unsqueeze(1)) & is_eos_mask.any(dim=1).unsqueeze(1)
-        completion_ids[mask_to_replace] = eos_token_id
+        # 首次 EOS 之后的位置用 pad_token_id 填充（而非 eos_token_id），
+        # 这样后续 create_attention_mask 才能正确把这些位置识别为 padding，
+        # 避免 batch 内所有 completion 被误判为等长（会导致 BNPO loss 恒为 0）。
+        completion_ids[mask_to_replace] = self.config.pad_token_id
         return completion_ids
