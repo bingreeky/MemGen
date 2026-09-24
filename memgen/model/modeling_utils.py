@@ -157,11 +157,12 @@ class MemGenGenerationMixin(GenerationMixin):
         batch_size = input_ids.size(0)
         device = input_ids.device
 
-        # 获取最后一个有效 token (跳过 padding)
-        pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
-        mask = input_ids != pad_token_id
-        last_positions = mask.sum(dim=1).clamp(min=1) - 1
-        last_tokens = input_ids[torch.arange(batch_size, device=device), last_positions]
+        # 本仓库统一使用 left padding，序列末尾始终是真实 token（非 pad），
+        # 直接取最后一列即可。先前用 mask.sum()-1 定位最后一个非 pad token，
+        # 该公式仅对 right padding 成立；对 left padding 会偏前 num_left_pad 个位置，
+        # 导致 _should_augment（传入含左 padding 的 current_input_ids）与
+        # _check_generate（传入已剥离 padding 的生成部分）检查不同 token。
+        last_tokens = input_ids[:, -1]
 
         # 预计算并缓存 delimiter token ids tensor (只执行一次)
         cache_key = '_delimiter_token_tensor'
