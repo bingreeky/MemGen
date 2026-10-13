@@ -3,18 +3,22 @@ import os
 import random
 from typing import Union
 
-from peft import PeftModel
+from peft import PeftModel, set_peft_model_state_dict
+from safetensors.torch import load_file
 import torch
 import torch.nn as nn
 from transformers import (
     AutoModelForCausalLM, 
     AutoTokenizer,
     GenerationConfig,
-    DynamicCache
+    DynamicCache,
+    StoppingCriteria,
+    StoppingCriteriaList,
 )
 from transformers.modeling_utils import PreTrainedModel
 
 from memgen.model.configuration_memgen import MemGenConfig
+from memgen.model.fast_sft import event_batched_forward
 from memgen.model.modeling_utils import (
     MemGenOutputWithPast,
     MemGenLoraSwitchMixin,
@@ -28,8 +32,22 @@ from memgen.utils import (
     log_trainable_params
 )
 
+
+class RowsFinished(StoppingCriteria):
+    """Carry rows that already emitted EOS in the token loop into the HF continuation."""
+
+    def __init__(self, finished: torch.Tensor):
+        self.finished = finished.clone()
+
+    def __call__(self, input_ids, scores, **kwargs):
+        return self.finished.to(input_ids.device)
+
+
 class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin):
     config_class = MemGenConfig
+    # forward() returns its own mean loss and ignores num_items_in_batch, so the Trainer must
+    # normalise gradient accumulation itself instead of assuming the model already did.
+    accepts_loss_kwargs = False
     INSTRUCTION_STATE = 0
     CONVERSATION_STATE = 1
 
@@ -339,6 +357,9 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
             forward_func = self._conversational_forward
         else:
             raise RuntimeError(f"Unexpected model state: {self.state}")
+
+        if self.config.fast_sft and self.state == MemGenModel.INSTRUCTION_STATE:
+            return self._loss_output(event_batched_forward(self, input_ids, attention_mask, labels), labels)
         
         batch_size = 1  # Currently process one sequence per batch
         iter_num = input_ids.size(0) // batch_size
@@ -363,7 +384,9 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
         # Concatenate results from all batches
         all_logits = torch.concat(logits, dim=0)
         all_labels = torch.concat(supervised_labels, dim=0)
+        return self._loss_output(all_logits, all_labels)
 
+    def _loss_output(self, all_logits: torch.Tensor, all_labels: torch.Tensor) -> MemGenOutputWithPast:
         # Compute causal language modeling loss (shifted by one)
         shift_logits = all_logits[..., :-1, :].contiguous()
         shift_labels = all_labels[..., 1:].contiguous()
@@ -371,10 +394,9 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
         loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
-        # Return model outputs
-        outputs = MemGenOutputWithPast(loss=loss, logits=all_logits)
-        outputs.supervised_labels = all_labels  # Positions in input_ids that are supervised
-        return outputs
+        # Pass every field to the constructor: ModelOutput only keeps constructor fields when it is
+        # rebuilt (e.g. by accelerate's mixed-precision output conversion).
+        return MemGenOutputWithPast(loss=loss, logits=all_logits, supervised_labels=all_labels)
 
     # @torch.no_grad()
     # def generate(
@@ -486,6 +508,7 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
 
         # Generation Loop Initialization
         sentence_augment_count = torch.zeros(B, dtype=torch.int, device=device)
+        finished = torch.zeros(B, dtype=torch.bool, device=device)  # rows that have emitted EOS
         
         # NOTE - Whether to call the trigger and insert latent memory before generating the token at this position
         # - augmentation_pos[b][i] == -100: For the b-th sequence, no augmentation was sampled before generating the i-th token
@@ -562,20 +585,35 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
 
             # Check if all sequences have reached the maximum number of augmentations
             if (sentence_augment_count >= max_augment_num).all():
+                # Same token distribution as _get_next_token: plain softmax(logits / T)
+                # sampling (no top-k/top-p), greedy when not sampling or T == 0.
+                do_sample = generation_config.weaver_do_sample and generation_config.temperature != 0
                 # Adjust the remaining generation length
                 generation_config_continue = GenerationConfig(
-                    do_sample=generation_config.weaver_do_sample,
+                    do_sample=do_sample,
+                    temperature=generation_config.temperature if do_sample else None,
+                    top_k=0 if do_sample else None,
+                    top_p=1.0 if do_sample else None,
                     pad_token_id=pad_token_id,
                     eos_token_id=eos_token_id,
-                    use_cache=False,
+                    use_cache=True,
                     max_new_tokens=max_new_tokens-i
                 )
-                # Perform generation for the remaining tokens using the reasoner
-                generated = reasoner.generate(
-                    inputs_embeds=current_inputs_embeds,
-                    attention_mask=current_attention_mask,
-                    generation_config=generation_config_continue
-                )
+                # Perform generation for the remaining tokens using the reasoner.
+                # transformers fills every field left at its global default from the base
+                # model's generation_config (SmolLM3: do_sample=True, temperature=0.6; Qwen2.5:
+                # top_k=20, repetition_penalty=1.1, ...), silently changing the distribution.
+                model_generation_config = reasoner.generation_config
+                reasoner.generation_config = GenerationConfig()
+                try:
+                    generated = reasoner.generate(
+                        inputs_embeds=current_inputs_embeds,
+                        attention_mask=current_attention_mask,
+                        generation_config=generation_config_continue,
+                        stopping_criteria=StoppingCriteriaList([RowsFinished(finished)]),
+                    )
+                finally:
+                    reasoner.generation_config = model_generation_config
                 current_input_ids = torch.cat([current_input_ids, generated], dim=1)
                 break            
 
@@ -593,7 +631,8 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
                 position_ids=reasoner_position_ids,
                 output_hidden_states=False,
                 use_cache=True,
-                past_key_values=current_cache
+                past_key_values=current_cache,
+                logits_to_keep=1,  # only the last position selects the next token
             )
             current_inputs_embeds, current_attention_mask, current_position_ids, current_input_ids = self._append_one_step(
                 outputs, 
@@ -606,9 +645,10 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
             )
             current_cache = outputs.past_key_values
 
-            # If all sequences in the batch have already generated an EOS token, stop early
-            if (current_input_ids[:, -1] == eos_token_id).all():
-                break  
+            # Stop once every row has emitted an EOS; later tokens are erased after the first EOS
+            finished |= current_input_ids[:, -1] == eos_token_id
+            if finished.all():
+                break
 
             # This is needed to properly delete outputs.logits which may be very large for first iteration
             # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
@@ -661,14 +701,24 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
             inference_latents_len=inference_latents_len,
             weaver_lora_config=weaver_lora_config_dict,
             trigger_active=trigger_active,
-            trigger_lora_config=trigger_lora_config_dict
+            trigger_lora_config=trigger_lora_config_dict,
+            fast_sft=config_dict.get("fast_sft", False),
         )
         
         # load pretrained base models
         base_tokenizer = AutoTokenizer.from_pretrained(model_name)
-        reasoner_base_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2")
-        weaver_base_model = AutoModelForCausalLM.from_pretrained(weaver_model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2")
-        trigger_base_model = AutoModelForCausalLM.from_pretrained(trigger_model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2")
+        if trigger_active and AutoTokenizer.from_pretrained(trigger_model_name).get_vocab() != base_tokenizer.get_vocab():
+            # The Weaver reads Reasoner embeddings through projections, so any backbone works.
+            # The Trigger reads Reasoner token ids directly, which only mean the same thing
+            # to a backbone with the same tokenizer.
+            logging.warning(
+                f"Trigger backbone {trigger_model_name} has a different tokenizer from the "
+                f"Reasoner {model_name}; the Trigger will read Reasoner token ids as its own."
+            )
+        attn_implementation = config_dict.get("attn_implementation", "flash_attention_2")
+        reasoner_base_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, attn_implementation=attn_implementation)
+        weaver_base_model = AutoModelForCausalLM.from_pretrained(weaver_model_name, torch_dtype=torch.bfloat16, attn_implementation=attn_implementation)
+        trigger_base_model = AutoModelForCausalLM.from_pretrained(trigger_model_name, torch_dtype=torch.bfloat16, attn_implementation=attn_implementation)
         
         # instantiate MemGen Model
         load_model_path = config_dict.get("load_model_path", None)
@@ -747,6 +797,13 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
             weaver_base_model=weaver_base_model,
             trigger_base_model=trigger_base_model,
         )
+        model.load_checkpoint(load_directory)
+        return model
+
+    def load_checkpoint(self, load_directory: str):
+        """Load MemGen weights in place; every parameter keeps its trainable/frozen flag."""
+        model = self
+        trainable = {name: p.requires_grad for name, p in model.named_parameters()}
 
         proj_path = os.path.join(load_directory, "projs.bin")
         proj_state = torch.load(proj_path, map_location="cpu")
@@ -766,22 +823,46 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
         trigger_state = torch.load(trigger_path, map_location="cpu")
         model.trigger.output_layer.load_state_dict(trigger_state["output_layer"])
 
-        model.weaver.model = PeftModel.from_pretrained(
-            model.weaver.model.base_model,
+        # __init__ already injected the adapters; load the saved weights into them in place.
+        # Wrapping the LoraModel in a second PeftModel would add a "model." prefix, and peft
+        # would then silently skip every saved LoRA tensor.
+        _load_lora_weights(
+            model.weaver.model,
             os.path.join(load_directory, "weaver", "weaver"),
-            adapter_name=MemGenWeaver.adapter_name,
+            MemGenWeaver.adapter_name,
         )
         model.weaver.model.set_adapter(MemGenWeaver.adapter_name)
 
-        model.trigger.model = PeftModel.from_pretrained(
-            model.trigger.model.base_model,
+        _load_lora_weights(
+            model.trigger.model,
             os.path.join(load_directory, "trigger", "trigger"),
-            adapter_name=MemGenTrigger.adapter_name,
+            MemGenTrigger.adapter_name,
         )
         model.trigger.model.set_adapter(MemGenTrigger.adapter_name)
+
+        for name, parameter in model.named_parameters():
+            parameter.requires_grad_(trainable[name])
 
         logging.info("##### MemGen from Pretrained #####")
         log_trainable_params(model)
 
-        return model
 
+def _load_lora_weights(peft_model: PeftModel, adapter_dir: str, adapter_name: str):
+    """Load a saved LoRA adapter into the adapter already injected in `peft_model`.
+
+    Checkpoints saved from a double-wrapped PeftModel (some released weaver-grpo ones)
+    carry one extra "model." level in their keys; both layouts are accepted. A tensor
+    that does not match the model is an error rather than being silently skipped.
+    """
+    state = load_file(os.path.join(adapter_dir, "adapter_model.safetensors"))
+    live = {k.replace(f".{adapter_name}.", ".") for k in peft_model.state_dict() if "lora_" in k}
+    remapped = {}
+    for key, tensor in state.items():
+        candidates = [key, key.replace("base_model.model.model.", "base_model.model.", 1)]
+        target = next((k for k in candidates if k in live), None)
+        if target is None:
+            raise KeyError(f"LoRA tensor {key} from {adapter_dir} does not match the model")
+        remapped[target] = tensor
+    result = set_peft_model_state_dict(peft_model, remapped, adapter_name=adapter_name)
+    if result.unexpected_keys:
+        raise KeyError(f"Unexpected LoRA keys from {adapter_dir}: {result.unexpected_keys[:5]}")

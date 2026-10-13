@@ -16,6 +16,8 @@ class MemGenConfig(PretrainedConfig):
         trigger_lora_config: Optional[dict] = None,
         max_prompt_aug_num: int = 1,
         max_inference_aug_num: int = 5,
+        # batch Weaver SFT examples instead of looping (see memgen/model/fast_sft.py)
+        fast_sft: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -30,3 +32,6 @@ class MemGenConfig(PretrainedConfig):
         self.trigger_lora_config = trigger_lora_config
         self.max_prompt_aug_num = max_prompt_aug_num
         self.max_inference_aug_num = max_inference_aug_num
+
+        # training speed-ups
+        self.fast_sft = fast_sft

@@ -170,8 +170,8 @@ class MemGenRunner:
 
             self.generation_manager.generation_config.trigger_do_sample = True
             self.generation_manager.generation_config.weaver_do_sample = False
-            self.generation_manager.generation_config.temperature = self.weaver_grpo_training_args.temperature
-            self.generation_manager.generation_config.max_new_tokens = self.weaver_grpo_training_args.max_completion_length
+            self.generation_manager.generation_config.temperature = self.trigger_grpo_training_args.temperature
+            self.generation_manager.generation_config.max_new_tokens = self.trigger_grpo_training_args.max_completion_length
             
             trigger_trainer = TriggerGRPOTrainer(
                 model=self.model, 
@@ -179,7 +179,8 @@ class MemGenRunner:
                 train_dataset=self.trigger_train_dataset, 
                 eval_dataset=self.trigger_valid_dataset, 
                 reward_funcs=[self.env_cls.compute_reward],
-                args=self.trigger_grpo_training_args
+                args=self.trigger_grpo_training_args,
+                generation_config=self.generation_manager.generation_config,
             )
         else:
             raise ValueError("Unsupported trigger training method.")

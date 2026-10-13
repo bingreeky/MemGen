@@ -16,18 +16,18 @@ export NCCL_ASYNC_DISABLE=1
 REASONER_MODEL="Qwen/Qwen2.5-1.5B-Instruct"
 WEAVER_MODEL="Qwen/Qwen2.5-1.5B-Instruct"   
 TRIGGER_MODEL="Qwen/Qwen2.5-1.5B-Instruct"
-TRIGGER_ACTIVE=False
+TRIGGER_ACTIVE=True
 
-DATASET_NAME="kodcode"
+DATASET_NAME="gsm8k"
 
 MAX_PROMPT_AUG_NUM=1
 MAX_INFERENCE_AUG_NUM=5
-PROMPT_LATENTS_LEN=4
-INFERENCE_LATENTS_LEN=4
+PROMPT_LATENTS_LEN=8
+INFERENCE_LATENTS_LEN=8
 
 BATCH_SIZE=4
 
-LOAD_MODEL_PATH="MemGen/Qwen2.5-1.5B-Instruct/kodcode/weaver-sft/pn=1_pl=4_in=5_il=4/model"
+LOAD_MODEL_PATH="MemGen/Qwen2.5-1.5B-Instruct/gsm8k/weaver-sft-trigger/pn=1_pl=8_in=5_il=8/model"
 
 # evaluate
 python -m accelerate.commands.launch \

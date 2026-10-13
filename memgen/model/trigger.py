@@ -25,14 +25,14 @@ class MemGenTrigger(nn.Module):
     ) -> torch.FloatTensor:
         
         if self.active:
-            outputs = self.model(
+            # The Trigger head reads final hidden states only; skip the backbone's LM head.
+            hidden_states = self.model.get_base_model().get_decoder()(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                position_ids=position_ids,  
-                output_hidden_states=True,
-            )
-            hidden_states = outputs.hidden_states[-1]
-            logits = self.output_layer(hidden_states)
+                position_ids=position_ids,
+                use_cache=False,
+            ).last_hidden_state
+            logits = self.output_layer(hidden_states.to(self.output_layer.weight.dtype))
         
         else:
             batch_size, seq_len = input_ids.shape

@@ -2,6 +2,10 @@ model:
   # base llm
   model_name: Qwen/Qwen2.5-1.5B-Instruct
   load_model_path: null
+  attn_implementation: flash_attention_2  # or sdpa / eager
+  # Weaver SFT speed-up: batch examples instead of looping over them one by one
+  # (same loss and gradients up to floating-point summation order)
+  fast_sft: False
   
   # max prompt/inference augmentation num
   max_prompt_aug_num: 1  # single turn

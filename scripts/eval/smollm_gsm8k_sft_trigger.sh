@@ -13,10 +13,10 @@ export NCCL_IB_DISABLE=1
 export NCCL_P2P_DISABLE=1
 export NCCL_ASYNC_DISABLE=1
 
-REASONER_MODEL="Qwen/Qwen2.5-1.5B-Instruct"
-WEAVER_MODEL="Qwen/Qwen2.5-1.5B-Instruct"   
-TRIGGER_MODEL="Qwen/Qwen2.5-1.5B-Instruct"
-TRIGGER_ACTIVE=False
+REASONER_MODEL="HuggingFaceTB/SmolLM3-3B"
+WEAVER_MODEL="HuggingFaceTB/SmolLM3-3B"   
+TRIGGER_MODEL="HuggingFaceTB/SmolLM3-3B"
+TRIGGER_ACTIVE=True
 
 DATASET_NAME="gsm8k"
 
@@ -27,9 +27,8 @@ INFERENCE_LATENTS_LEN=8
 
 BATCH_SIZE=4
 
-LOAD_MODEL_PATH="MemGen/Qwen2.5-1.5B-Instruct/gsm8k/weaver-sft/pn=1_pl=8_in=3_il=8/model"
+LOAD_MODEL_PATH="MemGen/SmolLM3-3B/gsm8k/weaver-sft-trigger/pn=1_pl=8_in=3_il=8/model"
 
-# evaluate
 python -m accelerate.commands.launch \
     --config_file=configs/zero2.yaml \
     --num_processes=${NUM_GPUS} \

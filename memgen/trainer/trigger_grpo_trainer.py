@@ -42,12 +42,16 @@ class TriggerGRPOTrainer(GRPOTrainer):
         callbacks: Optional[list[TrainerCallback]] = None,
         optimizers: tuple[Optional[torch.optim.Optimizer], Optional[torch.optim.lr_scheduler.LambdaLR]] = (None, None),
         peft_config: Optional[PeftConfig] = None,
+        generation_config=None,
     ):        
         # NOTE - Gradient accumulation requires scaled loss. Normally, loss scaling in the parent class depends on whether the
         # model accepts loss-related kwargs. Since we compute our own loss, this check is irrelevant. We set
         # self.model_accepts_loss_kwargs to False to enable scaling.
         self.model_accepts_loss_kwargs = False
 
+        # With beta != 0 the parent would rebuild a reference copy of the whole model from its
+        # name, which a MemGen model does not have. Skip that; a Trigger-only reference is built below.
+        beta, args.beta = args.beta, 0.0
         super().__init__(
             model=model,
             args=args,
@@ -60,10 +64,14 @@ class TriggerGRPOTrainer(GRPOTrainer):
             optimizers=optimizers,
             peft_config=peft_config
         )
+        args.beta = self.beta = beta
 
         # If PEFT configuration is not provided, create a reference model based on the initial model.
-        ref_model = create_reference_model(model.trigger)
-        self.ref_model = self.accelerator.prepare_model(ref_model, evaluation_mode=True)
+        if self.beta != 0.0:
+            ref_model = create_reference_model(model.trigger)
+            self.ref_model = self.accelerator.prepare_model(ref_model, evaluation_mode=True)
+        if generation_config is not None:
+            self.generation_config = generation_config
         self.tensor_fn = TensorHelper(TensorConfig(
             pad_token_id=self.processing_class.pad_token_id,
             max_prompt_length=self.max_prompt_length,
@@ -89,12 +97,14 @@ class TriggerGRPOTrainer(GRPOTrainer):
         
         assert input_ids.shape == attention_mask.shape
         position_ids = generate_position_ids(attention_mask)
-        augmentation_logits = model.trigger(
+        trigger = getattr(model, "trigger", model)  # the reference model is a bare Trigger
+        augmentation_logits = trigger(
             input_ids=input_ids, 
             attention_mask=attention_mask,
             position_ids=position_ids
         )
-        clipped_logits = augmentation_logits[:, prompt_len - 1 : -1]
+        # Decisions were sampled from softmax(logits / T); score them under the same distribution.
+        clipped_logits = augmentation_logits[:, prompt_len - 1 : -1] / self.temperature
         assert clipped_logits.shape[:-1] == augmentation_mask.shape
         
         temp_mask = augmentation_mask.clone()
@@ -151,11 +161,13 @@ class TriggerGRPOTrainer(GRPOTrainer):
         with unwrap_model_for_generation(
             self.model_wrapped, self.accelerator, gather_deepspeed3_params=self.args.ds3_gather_for_generation
         ) as unwrapped_model:
+            # Roll out under the same mixed precision as the training forward pass; outside it the
+            # fp32 trainable parameters (projections, Trigger head) meet bf16 activations.
             with (
                 FSDP.summon_full_params(self.model_wrapped, recurse=False)
                 if self.is_fsdp_enabled
                 else nullcontext()
-            ):
+            ), self.accelerator.autocast():
                 prompt_ids = gen_batch.batch["input_ids"]
                 prompt_mask = gen_batch.batch["attention_mask"]
                 prompt_completion_ids, augmentation_mask = unwrapped_model.generate(

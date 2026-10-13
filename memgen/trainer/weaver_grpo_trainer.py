@@ -191,11 +191,13 @@ class WeaverGRPOTrainer(GRPOTrainer):
         with unwrap_model_for_generation(
             self.model_wrapped, self.accelerator, gather_deepspeed3_params=self.args.ds3_gather_for_generation
         ) as unwrapped_model:
+            # Roll out under the same mixed precision as the training forward pass; outside it the
+            # fp32 trainable parameters (projections, latent queries) meet bf16 activations.
             with (
                 FSDP.summon_full_params(self.model_wrapped, recurse=False)
                 if self.is_fsdp_enabled
                 else nullcontext()
-            ):
+            ), self.accelerator.autocast():
                 # Use GenerationManager to coordinate the interaction between the agent and the environment
                 self.generation_manager.actor_rollout_wg = unwrapped_model  
                 final_gen_batch_output = self.generation_manager.run_agent_loop(gen_batch=gen_batch)

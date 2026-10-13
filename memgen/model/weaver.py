@@ -82,13 +82,14 @@ class MemGenWeaver(nn.Module):
         # the processor only outputs the hidden states
         assert inputs_embeds.shape[:2] == attention_mask.shape == position_ids.shape
 
-        outputs = self.model(
+        # Only the final hidden states are needed: run the (LoRA-injected) decoder and skip
+        # the LM head, whose vocabulary-sized logits would otherwise be computed and discarded.
+        hidden_states = self.model.get_base_model().get_decoder()(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
-            position_ids=position_ids,  
-            output_hidden_states=True,
-        )
-        hidden_states = outputs.hidden_states[-1]
+            position_ids=position_ids,
+            use_cache=False,
+        ).last_hidden_state
         latents_hidden_states = hidden_states[:, -latents_num:, :]
 
         return latents_hidden_states, latents_mask, latents_position_ids

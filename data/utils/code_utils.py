@@ -16,7 +16,7 @@ def extract_python_code(text_string: str) -> List[str]:
 
     results = []
     for block in code_blocks:
-        imports = re.findall(r"^(?:from\s+\S+\s+import\s+\S+|import\s+\S+.*)$", block, re.MULTILINE)
+        imports = re.findall(r"^(?:from\s+\S+\s+import\s+.+|import\s+\S+.*)$", block, re.MULTILINE)
 
         funcs = re.findall(r"(def\s+\w+\(.*?:[\s\S]*?)(?=^def\s|\Z)", block.strip(), re.MULTILINE)
 

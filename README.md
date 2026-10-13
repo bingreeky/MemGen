@@ -56,16 +56,17 @@ Below are several MemGen models based on Qwen2.5-1.5B-Instruct and SmolLM3-3B ac
 
 | model | dataset | mode | link | eval_script | train_script |
 |-------|---------|------|------|-------------|--------------|
-| Qwen2.5-1.5B-Instruct | KodCode | weaver-sft | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/Qwen2.5-1.5B-Instruct/kodcode/weaver-sft) | `scripts/eval/qwen2_5_kodcode_sft.sh` | `scripts/train/qwen2_5_kodcode_sft.sh` |
+| Qwen2.5-1.5B-Instruct | KodCode | weaver-sft + trigger | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/Qwen2.5-1.5B-Instruct/kodcode/weaver-sft-trigger) | `scripts/eval/qwen2_5_kodcode_sft_trigger.sh` | `scripts/train/qwen2_5_kodcode_sft_trigger.sh` |
 | Qwen2.5-1.5B-Instruct | KodCode | weaver-grpo | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/Qwen2.5-1.5B-Instruct/kodcode/weaver-grpo) | `scripts/eval/qwen2_5_kodcode_grpo.sh` | `scripts/train/qwen2_5_kodcode_grpo.sh` |
-| Qwen2.5-1.5B-Instruct | GSM8K | weaver-sft | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/Qwen2.5-1.5B-Instruct/gsm8k/weaver-sft) | `scripts/eval/qwen2_5_gsm8k_sft.sh` | `scripts/train/qwen2_5_gsm8k_sft.sh` |
+| Qwen2.5-1.5B-Instruct | GSM8K | weaver-sft + trigger | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/Qwen2.5-1.5B-Instruct/gsm8k/weaver-sft-trigger) | `scripts/eval/qwen2_5_gsm8k_sft_trigger.sh` | `scripts/train/qwen2_5_gsm8k_sft_trigger.sh` |
 | Qwen2.5-1.5B-Instruct | GSM8K | weaver-grpo | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/Qwen2.5-1.5B-Instruct/gsm8k/weaver-grpo) | `scripts/eval/qwen2_5_gsm8k_grpo.sh` | `scripts/train/qwen2_5_gsm8k_grpo.sh` |
 | Qwen2.5-1.5B-Instruct | TriviaQA | weaver-sft | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/Qwen2.5-1.5B-Instruct/triviaqa/weaver-sft) | `scripts/eval/qwen2_5_triviaqa.sh` | `scripts/train/qwen2_5_triviaqa.sh` |
 | SmolLM3-3B | KodCode | weaver-sft | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/SmolLM3-3B/kodcode/weaver-sft) | `scripts/eval/smollm_kodcode.sh` | `scripts/train/smollm_kodcode.sh` |
+| SmolLM3-3B | GSM8K | weaver-sft + trigger | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/SmolLM3-3B/gsm8k/weaver-sft-trigger) | `scripts/eval/smollm_gsm8k_sft_trigger.sh` | `scripts/train/smollm_gsm8k_sft_trigger.sh` |
 | SmolLM3-3B | TriviaQA | weaver-sft | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/SmolLM3-3B/triviaqa/weaver-sft) | `scripts/eval/smollm_triviaqa.sh` | `scripts/train/smollm_triviaqa.sh` |
 
 
-If you prefer to evaluate the vanilla model instead of MemGen, simply modify `memgen/model/modeling_memgen.py` by replacing the current `generate` function (Lines 452–629) with the commented alternative `generate` implementation (Lines 379–450), and then run the standard evaluation script.
+If you prefer to evaluate the vanilla model instead of MemGen, simply modify `memgen/model/modeling_memgen.py` by replacing the active `generate` function with the commented-out alternative `generate` implementation directly above it, and then run the standard evaluation script.
 
 
 ## ▶️ How to Run
@@ -74,27 +75,34 @@ MemGen consists of **two modules**: *Weaver* and *Trigger*. We follow a two-stag
 If you would like to reproduce results for a specific dataset + model, please refer to the table above. If the corresponding checkpoint is not yet available, we kindly ask for your patience as we are actively preparing more comprehensive releases.
 
 ### Weaver Model
-- **Train the Weaver model**
+- **Train the Weaver model** (SFT or GRPO)
     ```bash
-    bash weaver_train.sh
+    bash scripts/weaver_sft.sh
+    bash scripts/weaver_grpo.sh
     ```
 
 - **Evaluate the Weaver model**  
-    Before running, make sure to update `LOAD_MODEL_PATH` in `eval.sh` to point to the trained checkpoint: `<weaver_dir>`
+    Before running, make sure to update `LOAD_MODEL_PATH` in `scripts/eval.sh` to point to the trained checkpoint: `<weaver_dir>`
     ```bash
-    bash eval.sh
+    bash scripts/eval.sh
     ```
 
 ### Trigger Model
 - **Train the Trigger model**
     ```bash
-    bash trigger_train.sh
+    bash scripts/trigger_train.sh
     ```
 - **Evaluate the Trigger model**  
-    Before running, make sure to update `LOAD_MODEL_PATH` in `eval.sh` to point to the trained checkpoint: `<trigger_dir>`
+    Before running, make sure to update `LOAD_MODEL_PATH` in `scripts/eval.sh` to point to the trained checkpoint: `<trigger_dir>`
     ```bash
-    bash eval.sh
+    bash scripts/eval.sh
     ```
+
+### Options
+Set in `configs/latent_memory/<dataset>.yaml` or override with `--options` (e.g. `model.fast_sft True`):
+- `model.attn_implementation`: `flash_attention_2` (default), `sdpa` or `eager`.
+- `model.fast_sft`: batch Weaver SFT examples instead of processing them one by one (about 2x faster; same loss and gradients up to floating-point summation order). Off by default.
+
 
 
 
