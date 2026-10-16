@@ -5,7 +5,7 @@ export LOG_PATH="./debug_log_2b.txt"
 export CUDA_VISIBLE_DEVICES=0
 export MAIN_PROCESS_PORT=29507
 
-# 自动计算 GPU 数量
+# Count the visible GPUs automatically.
 NUM_GPUS=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
 echo "Using $NUM_GPUS GPU(s): CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 export NCCL_DEBUG=INFO

@@ -2,6 +2,7 @@ from datasets import DatasetDict, load_dataset
 from typing import Dict, List
 import re
 import copy
+import random
 
 from data.base_builder import BaseBuilder
 from data.triviaqa.env import TriviaQAEnv
@@ -50,9 +51,24 @@ class TriviaQABuilder(BaseBuilder):  # Env
     def _build_rl_datasets(self) -> DatasetDict:
         
         ds = load_dataset("mandarjoshi/trivia_qa", "rc.wikipedia.nocontext")   
-        raw_train_dataset = ds["train"]
-        raw_valid_dataset = ds["validation"]
-        raw_test_dataset = ds["test"]
+        # Wikipedia has no labeled test split. Hold out official validation for
+        # evaluation and split official train by question to prevent overlap.
+        raw_test_dataset = ds["validation"]
+        heldout = {row["question"].strip().casefold() for row in raw_test_dataset}
+        grouped = {}
+        for index, row in enumerate(ds["train"]):
+            question = row["question"].strip().casefold()
+            if question not in heldout:
+                grouped.setdefault(question, index)
+        questions = sorted(grouped)
+        random.Random(self.config.get("seed", 42)).shuffle(questions)
+        valid_size = max(1, int(len(questions) * self.config.get("valid_ratio", 0.1)))
+        valid_questions, train_questions = questions[:valid_size], questions[valid_size:]
+        train_size = self.config.get("train_size", 0)
+        if train_size:
+            train_questions = train_questions[:train_size]
+        raw_train_dataset = ds["train"].select([grouped[q] for q in train_questions])
+        raw_valid_dataset = ds["train"].select([grouped[q] for q in valid_questions])
        
         num_workers = 32
         train_dataset = raw_train_dataset.map(self._rl_preprocess, num_proc=num_workers).select_columns(self._rl_keep_keys())

@@ -143,7 +143,7 @@ class MemGenGenerationMixin(GenerationMixin):
         return new_labels
 
     def _get_delimiter_token_ids(self, tokenizer, delimiters: list[str]) -> Set[int]:
-        """预计算 delimiter 对应的 token ids (在 __init__ 后调用一次)"""
+        """Precompute delimiter token IDs once after initialization."""
         delimiter_token_ids = set()
         for d in delimiters:
             ids = tokenizer.encode(d, add_special_tokens=False)
@@ -153,18 +153,18 @@ class MemGenGenerationMixin(GenerationMixin):
     def _check_ends_with_delimiter(
         self, input_ids: torch.Tensor, tokenizer, delimiters: list[str]
     ) -> torch.Tensor:
-        """检查每个序列的最后一个 token 是否是 delimiter token (O(1) 每序列，无 decode)"""
+        """Check the final token of each sequence for a delimiter without decoding (O(1) per sequence)."""
         batch_size = input_ids.size(0)
         device = input_ids.device
 
-        # 本仓库统一使用 left padding，序列末尾始终是真实 token（非 pad），
-        # 直接取最后一列即可。先前用 mask.sum()-1 定位最后一个非 pad token，
-        # 该公式仅对 right padding 成立；对 left padding 会偏前 num_left_pad 个位置，
-        # 导致 _should_augment（传入含左 padding 的 current_input_ids）与
-        # _check_generate（传入已剥离 padding 的生成部分）检查不同 token。
+        # This repository uses left padding, so the final position always holds a real token.
+        # Read the last column directly. The previous mask.sum()-1 indexing works only
+        # for right padding; with left padding, it points num_left_pad positions too early.
+        # That made _should_augment, which receives left-padded current_input_ids, and
+        # _check_generate, which receives unpadded generated tokens, inspect different tokens.
         last_tokens = input_ids[:, -1]
 
-        # 预计算并缓存 delimiter token ids tensor (只执行一次)
+        # Precompute and cache the delimiter token ID tensor once.
         cache_key = '_delimiter_token_tensor'
         if not hasattr(self, cache_key):
             token_ids = self._get_delimiter_token_ids(tokenizer, delimiters)
@@ -388,10 +388,10 @@ class MemGenGenerationMixin(GenerationMixin):
     
     @torch.no_grad()
     def _check_generate(self, input_ids: torch.LongTensor, augmentation_pos: torch.LongTensor):
-        """检查 augmentation_pos[b][i] == 1 的位置, input_ids[b][:i] (不包括第 i 位) 对应的字符串是否以 delimiters 结尾
-        仅在 DEBUG_MODE 下启用，避免训练时的性能开销
+        """Check whether the text for input_ids[b][:i] (excluding position i) ends with a delimiter where augmentation_pos[b][i] == 1.
+        Enable this check only in DEBUG_MODE to avoid overhead during training.
         """
-        # 仅在 DEBUG 模式下执行验证，避免训练时的大量 decode 开销
+        # Validate only in DEBUG_MODE to avoid repeated decoding during training.
         if os.environ.get('DEBUG_MODE', '').lower() != 'true':
             return
 

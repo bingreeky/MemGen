@@ -92,6 +92,7 @@ class MemGenRunner:
 
     def _filter_dataset(self, dataset: Dataset) -> Dataset:
         tokenizer = self.processing_class
+        is_triviaqa = self.config.get("dataset", {}).get("name") == "triviaqa"
 
         # Determine max length based on training mode
         max_len = 1024
@@ -107,7 +108,16 @@ class MemGenRunner:
         # Function to filter out samples exceeding max length
         def filter_func(sample):
             if "prompt" in sample and sample["prompt"] is not None:
-                prompt = tokenizer.apply_chat_template(sample["prompt"], tokenize=True)
+                messages = sample["prompt"]
+                # Dataset fingerprints serialize this closure. Capture only
+                # tokenizer/scalars, never self (which owns the full model).
+                if isinstance(messages, str) and is_triviaqa:
+                    from data.triviaqa.builder import TRIVIAQA_SYSTEM_PROMPT
+                    messages = [{"role": "system", "content": TRIVIAQA_SYSTEM_PROMPT},
+                                {"role": "user", "content": messages}]
+                    prompt = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+                else:
+                    prompt = tokenizer.apply_chat_template(messages, tokenize=True)
                 return len(prompt) < max_len
             elif "messages" in sample and sample["messages"] is not None:
                 conversation = tokenizer.apply_chat_template(sample["messages"][:2], tokenize=True)
@@ -144,7 +154,35 @@ class MemGenRunner:
             
             # self.weaver_train_dataset = self.weaver_train_dataset.select(range(1600))
             
-            weaver_trainer = WeaverGRPOTrainer(
+            trainer_cls = WeaverGRPOTrainer
+            training_env_cls = self.env_cls
+            callbacks = []
+            if self.config["dataset"]["name"] == "triviaqa":
+                from pathlib import Path
+                from memgen.trainer.triviaqa_grpo_runtime import (
+                    StrictTriviaQAEnv, TriviaQAGrpoInteraction,
+                    TriviaQAWeaverGRPOTrainer, WeaverGradientAudit,
+                )
+                trainer_cls, training_env_cls = TriviaQAWeaverGRPOTrainer, StrictTriviaQAEnv
+                # Prompt-only GRPO leaves inference-latent parameters unused.
+                # Non-reentrant checkpointing supports unused-parameter detection;
+                # without it DDP fails when the second optimizer step starts.
+                if self.weaver_grpo_training_args.ddp_find_unused_parameters is None:
+                    self.weaver_grpo_training_args.ddp_find_unused_parameters = True
+                self.model.state = self.model.CONVERSATION_STATE
+                self.model.config.inference_use_cache = True
+                for backbone in (self.model.reasoner, self.model.weaver.model):
+                    backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+                    backbone.config.use_cache = False
+                self.generation_manager = TriviaQAGrpoInteraction(
+                    self.processing_class, self.model, self.interaction_config
+                )
+                self.generation_manager.generation_config.weaver_do_sample = True
+                self.generation_manager.generation_config.temperature = self.weaver_grpo_training_args.temperature
+                self.weaver_grpo_training_args.save_strategy = self.config["run"]["weaver"]["grpo"]["save_strategy"]
+                callbacks = [WeaverGradientAudit(Path(self.weaver_grpo_training_args.output_dir))]
+
+            weaver_trainer = trainer_cls(
                 model=self.model,
                 reward_funcs=[self.env_cls.compute_reward],
                 args=self.weaver_grpo_training_args,
@@ -152,9 +190,10 @@ class MemGenRunner:
                 eval_dataset=self.weaver_valid_dataset,
                 processing_class=self.processing_class,
                 # --- add env into trainer ---
-                env_class=self.env_cls,
+                env_class=training_env_cls,
                 env_main_config=self.config.get("dataset"),
                 generation_manager=self.generation_manager,
+                callbacks=callbacks,
             )
         else:
             raise ValueError("Unsupported weaver training method.")
@@ -204,10 +243,10 @@ class MemGenRunner:
             trainer.train()
             trainer.save_model()
         except RuntimeError as e:
-            # 检查是否是 OOM 相关的错误
+            # Check whether the error is related to running out of memory.
             if "OOM" in str(e) or "out of memory" in str(e).lower():
                 logging.error(f"[Runner] Training stopped due to OOM: {e}")
-                # 尝试最后一次保存
+                # Try to save one final checkpoint.
                 try:
                     oom_dir = os.path.join(self.working_dir, "model_oom_final")
                     logging.info(f"[Runner] Attempting to save final checkpoint to {oom_dir}")
@@ -217,7 +256,7 @@ class MemGenRunner:
                     logging.error(f"[Runner] Failed to save final checkpoint: {save_e}")
                 raise
             else:
-                # 非 OOM 错误，直接抛出
+                # Re-raise errors unrelated to running out of memory.
                 raise
         
 

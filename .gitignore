@@ -45,6 +45,7 @@ env/
 .DS_Store
 
 # Model weights and large files
+/hf_upload/
 *.pt
 *.pth
 *.bin

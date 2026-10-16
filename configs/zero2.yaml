@@ -12,7 +12,7 @@ machine_rank: 0
 main_training_function: main
 mixed_precision: 'no'
 num_machines: 1
-num_processes: 1  # 会被脚本自动覆盖，无需手动修改
+num_processes: 1  # Overridden automatically by the launcher script; no manual edit is needed.
 main_process_port: 44326
 rdzv_backend: static
 same_network: true

@@ -286,7 +286,7 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
         valid_starts = (diff == 1).nonzero(as_tuple=True)[0].tolist()  # Transition 0 -> 1
         ends = (diff == -1).nonzero(as_tuple=True)[0].tolist()          # Transition 1 -> 0
         if len(ends) < len(valid_starts):
-            ends.append(seq_len)  # 自动补充最后一个 token 的 (index + 1) 作为最后一个序列的末尾
+            ends.append(seq_len)  # Use one past the final token index as the end of the last segment.
         assert len(valid_starts) == len(ends)
         
         # Build triplets (start of previous segment, start of supervised segment, end of supervised segment)
@@ -716,9 +716,15 @@ class MemGenModel(PreTrainedModel, MemGenLoraSwitchMixin, MemGenGenerationMixin)
                 f"Reasoner {model_name}; the Trigger will read Reasoner token ids as its own."
             )
         attn_implementation = config_dict.get("attn_implementation", "flash_attention_2")
-        reasoner_base_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, attn_implementation=attn_implementation)
-        weaver_base_model = AutoModelForCausalLM.from_pretrained(weaver_model_name, torch_dtype=torch.bfloat16, attn_implementation=attn_implementation)
-        trigger_base_model = AutoModelForCausalLM.from_pretrained(trigger_model_name, torch_dtype=torch.bfloat16, attn_implementation=attn_implementation)
+        loading = dict(torch_dtype=torch.bfloat16, attn_implementation=attn_implementation)
+        # Optional direct placement avoids retaining three complete CPU backbones
+        # per rank beside a large CPU retrieval index. Unspecified keeps the
+        # existing CPU-loading behaviour; callers select their own local device.
+        if config_dict.get("load_device") is not None:
+            loading["device_map"] = {"": config_dict["load_device"]}
+        reasoner_base_model = AutoModelForCausalLM.from_pretrained(model_name, **loading)
+        weaver_base_model = AutoModelForCausalLM.from_pretrained(weaver_model_name, **loading)
+        trigger_base_model = AutoModelForCausalLM.from_pretrained(trigger_model_name, **loading)
         
         # instantiate MemGen Model
         load_model_path = config_dict.get("load_model_path", None)

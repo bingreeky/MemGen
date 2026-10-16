@@ -22,7 +22,7 @@ Unlike traditional approaches, MemGen generates latent memory tokens directly wi
 
 #### Q2: Where is the multi-turn GRPO code (e.g., for AlfWorld and TriviaQA)?
 
-**A:** We plan to release the MemGen-GRPO eval/train scripts and checkpoints after releasing those for MemGen-SFT. Thank you for your patience and understanding.
+**A:** TriviaQA multi-turn Weaver GRPO training and evaluation are available for the SmolLM3-3B Reasoner with either a Qwen2.5-1.5B-Instruct or SmolLM3-3B Weaver. See the scripts and checkpoints in the Quick Evaluation table below. Additional multi-turn environments, including AlfWorld, are planned for a future release.
 
 
 #### Q3: What improvements are included in the latest MemGen codebase?
@@ -63,7 +63,10 @@ Below are several MemGen models based on Qwen2.5-1.5B-Instruct and SmolLM3-3B ac
 | Qwen2.5-1.5B-Instruct | TriviaQA | weaver-sft | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/Qwen2.5-1.5B-Instruct/triviaqa/weaver-sft) | `scripts/eval/qwen2_5_triviaqa.sh` | `scripts/train/qwen2_5_triviaqa.sh` |
 | SmolLM3-3B | KodCode | weaver-sft | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/SmolLM3-3B/kodcode/weaver-sft) | `scripts/eval/smollm_kodcode.sh` | `scripts/train/smollm_kodcode.sh` |
 | SmolLM3-3B | GSM8K | weaver-sft + trigger | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/SmolLM3-3B/gsm8k/weaver-sft-trigger) | `scripts/eval/smollm_gsm8k_sft_trigger.sh` | `scripts/train/smollm_gsm8k_sft_trigger.sh` |
-| SmolLM3-3B | TriviaQA | weaver-sft | [huggingface link](https://huggingface.co/Kana-s/MemGen/tree/main/SmolLM3-3B/triviaqa/weaver-sft) | `scripts/eval/smollm_triviaqa.sh` | `scripts/train/smollm_triviaqa.sh` |
+| SmolLM3-3B (Weaver: Qwen2.5-1.5B-Instruct) | TriviaQA | weaver-sft | [huggingface link](https://huggingface.co/KANABOON1/MemGen/tree/main/SmolLM3-3B/triviaqa/weaver-qwen2.5-1.5b/weaver-sft) | `scripts/eval/smollm_triviaqa_qwen_weaver_sft.sh` | `scripts/train/smollm_triviaqa_qwen_weaver_sft.sh` |
+| SmolLM3-3B (Weaver: Qwen2.5-1.5B-Instruct) | TriviaQA | weaver-grpo | [huggingface link](https://huggingface.co/KANABOON1/MemGen/tree/main/SmolLM3-3B/triviaqa/weaver-qwen2.5-1.5b/weaver-grpo) | `scripts/eval/smollm_triviaqa_qwen_weaver_grpo.sh` | `scripts/train/smollm_triviaqa_qwen_weaver_grpo.sh` |
+| SmolLM3-3B (Weaver: SmolLM3-3B) | TriviaQA | weaver-sft | [huggingface link](https://huggingface.co/KANABOON1/MemGen/tree/main/SmolLM3-3B/triviaqa/weaver-smollm3-3b/weaver-sft) | `scripts/eval/smollm_triviaqa_smollm_weaver_sft.sh` | `scripts/train/smollm_triviaqa_smollm_weaver_sft.sh` |
+| SmolLM3-3B (Weaver: SmolLM3-3B) | TriviaQA | weaver-grpo | [huggingface link](https://huggingface.co/KANABOON1/MemGen/tree/main/SmolLM3-3B/triviaqa/weaver-smollm3-3b/weaver-grpo) | `scripts/eval/smollm_triviaqa_smollm_weaver_grpo.sh` | `scripts/train/smollm_triviaqa_smollm_weaver_grpo.sh` |
 
 
 If you prefer to evaluate the vanilla model instead of MemGen, simply modify `memgen/model/modeling_memgen.py` by replacing the active `generate` function with the commented-out alternative `generate` implementation directly above it, and then run the standard evaluation script.

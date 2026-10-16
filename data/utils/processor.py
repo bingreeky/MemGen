@@ -1,7 +1,7 @@
 from typing import Dict
 
 def add_eos(example, eos_token):
-    """在 labels 部分末尾添加 eos token
+    """Append the EOS token to the end of the label text.
     """
     if "text" in example and not example["text"].endswith(eos_token):  
         example["text"] = example["text"] + eos_token

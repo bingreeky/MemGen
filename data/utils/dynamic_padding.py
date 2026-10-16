@@ -13,7 +13,7 @@ class DynamicPaddingDataCollater:
         else:
             self.padding_value_input = tokenizer.pad_token_id
 
-        # labels 的填充值
+        # Padding value for labels
         self.padding_value_label = tokenizer.pad_token_id
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:

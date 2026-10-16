@@ -20,7 +20,7 @@ class TensorHelper:
         result = tensor_dict.copy()
         
         for key in keys:
-            if cut_left:  # 裁剪左侧
+            if cut_left:  # Trim the left side.
                 result[key] = tensor_dict[key][:, -effective_len:]
             else:
                 result[key] = tensor_dict[key][:, :effective_len]
@@ -81,8 +81,8 @@ class TensorHelper:
         seq_len = completion_ids.size(1)
         col_indices = torch.arange(seq_len, device=completion_ids.device)
         mask_to_replace = (col_indices > first_eos_indices.unsqueeze(1)) & is_eos_mask.any(dim=1).unsqueeze(1)
-        # 首次 EOS 之后的位置用 pad_token_id 填充（而非 eos_token_id），
-        # 这样后续 create_attention_mask 才能正确把这些位置识别为 padding，
-        # 避免 batch 内所有 completion 被误判为等长（会导致 BNPO loss 恒为 0）。
+        # Fill positions after the first EOS with pad_token_id rather than eos_token_id.
+        # This lets create_attention_mask correctly identify those positions as padding
+        # and avoids treating all completions in a batch as equally long, which would make the BNPO loss always zero.
         completion_ids[mask_to_replace] = self.config.pad_token_id
         return completion_ids

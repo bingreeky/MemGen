@@ -436,21 +436,21 @@ class WeaverGRPOTrainer(GRPOTrainer):
 
     def training_step(self, model, inputs, num_items_in_batch=None):
         """
-        重写 training_step 以捕获 OOM 异常并保存 checkpoint
+        Override training_step to catch out-of-memory errors and save a checkpoint.
         """
         try:
-            # 调用父类的 training_step
+            # Call the parent training_step implementation.
             loss = super().training_step(model, inputs, num_items_in_batch)
             return loss
         except torch.cuda.OutOfMemoryError as e:
-            # OOM 发生时保存 checkpoint
+            # Save a checkpoint if an out-of-memory error occurs.
             logging.error(f"[OOM] CUDA OutOfMemoryError occurred at step {self.state.global_step}")
             logging.error(f"[OOM] Error message: {str(e)}")
             
-            # 清理缓存以释放内存
+            # Clear the cache to release memory.
             torch.cuda.empty_cache()
             
-            # 保存 emergency checkpoint
+            # Save an emergency checkpoint.
             oom_ckpt_dir = os.path.join(self.args.output_dir, f"oom_checkpoint_step_{self.state.global_step}")
             logging.info(f"[OOM] Saving emergency checkpoint to {oom_ckpt_dir}")
             
@@ -460,7 +460,7 @@ class WeaverGRPOTrainer(GRPOTrainer):
             except Exception as save_error:
                 logging.error(f"[OOM] Failed to save checkpoint: {save_error}")
             
-            # 重新抛出异常，让训练停止
+            # Re-raise the exception to stop training.
             raise RuntimeError(
                 f"Training stopped due to OOM at step {self.state.global_step}. "
                 f"Emergency checkpoint saved to {oom_ckpt_dir}. "
